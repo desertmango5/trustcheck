@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { normalizeAnalysisResult } from "@/lib/normalizeAnalysisResult";
 import { TRUSTCHECK_SAMPLE_CASES } from "@/lib/sampleCases";
 import type { TrustCheckAnalysisResult } from "@/types/trustcheck";
@@ -83,6 +84,8 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isResultsOpen, setIsResultsOpen] = useState(false);
+  const [isScoreTooltipOpen, setIsScoreTooltipOpen] = useState(false);
+  const scoreTooltipRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!isResultsOpen) return;
@@ -96,6 +99,30 @@ export default function HomePage() {
     window.addEventListener("keydown", handleEscapeKey);
     return () => window.removeEventListener("keydown", handleEscapeKey);
   }, [isResultsOpen, isAnalyzing]);
+
+  useEffect(() => {
+    if (!isResultsOpen) {
+      setIsScoreTooltipOpen(false);
+    }
+  }, [isResultsOpen]);
+
+  useEffect(() => {
+    if (!isScoreTooltipOpen) return;
+
+    function handleOutsidePointer(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node | null;
+      if (scoreTooltipRef.current && target && !scoreTooltipRef.current.contains(target)) {
+        setIsScoreTooltipOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsidePointer);
+    document.addEventListener("touchstart", handleOutsidePointer);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsidePointer);
+      document.removeEventListener("touchstart", handleOutsidePointer);
+    };
+  }, [isScoreTooltipOpen]);
 
   async function handleAnalyze() {
     const normalizedInput = inputText.trim();
@@ -359,7 +386,35 @@ export default function HomePage() {
                   <>
                     <div className="results-top">
                       <article className="result-panel score-panel score-panel-large">
-                        <h3>Overall Trust Score</h3>
+                        <div className="score-heading-row">
+                          <h3>Overall Trust Score</h3>
+                          <div
+                            className={`score-tooltip ${
+                              isScoreTooltipOpen ? "is-open" : ""
+                            }`}
+                            ref={scoreTooltipRef}
+                          >
+                            <button
+                              type="button"
+                              className="score-tooltip-trigger"
+                              aria-label="How this score works"
+                              aria-expanded={isScoreTooltipOpen}
+                              onClick={() =>
+                                setIsScoreTooltipOpen((previous) => !previous)
+                              }
+                            >
+                              ⓘ
+                            </button>
+                            <div role="tooltip" className="score-tooltip-content">
+                              How this score works: TrustCheck uses a weighted
+                              rubric across 8 credibility categories, including
+                              sources, evidence, claim discipline, uncertainty,
+                              and verification burden. The score reflects
+                              credibility signals in the content, not proof that
+                              something is true or false.
+                            </div>
+                          </div>
+                        </div>
                         <p className="score-value">{analysisResult.trustScore}</p>
                         <p className="score-scale">Scored on a 0-100 range</p>
                         <h3>Trust Level</h3>
@@ -450,10 +505,13 @@ export default function HomePage() {
           </div>
         ) : null}
 
-        <p className="disclaimer">
-          TrustCheck evaluates credibility signals. It does not guarantee truth
-          or falsity.
-        </p>
+        <footer className="page-footer-link">
+          <Link href="/how-trustcheck-works">How TrustCheck Works</Link>
+          <p className="disclaimer">
+            TrustCheck evaluates credibility signals. It does not guarantee
+            truth or falsity.
+          </p>
+        </footer>
       </section>
     </main>
   );
