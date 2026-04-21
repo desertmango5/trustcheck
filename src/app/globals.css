@@ -171,10 +171,9 @@ body {
   display: flex;
   gap: 0.55rem;
   flex-wrap: wrap;
-  position: sticky;
-  bottom: 0;
-  background: linear-gradient(to top, #fcfdff 72%, rgba(252, 253, 255, 0));
-  padding-top: 0.35rem;
+  position: static;
+  background: transparent;
+  padding-top: 0;
 }
 
 .clear-button {
@@ -644,6 +643,15 @@ body {
   margin: 0.15rem 0 0.7rem !important;
 }
 
+.confidence-pill {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 0.15rem 0 0.1rem !important;
+}
+
 .trust-high {
   background: #e8f5ec;
   color: #216a3a;
@@ -663,6 +671,24 @@ body {
 }
 
 .trust-weak {
+  background: #fdf0ef;
+  color: #9a3f3a;
+  border: 1.5px solid #c8746d;
+}
+
+.confidence-high {
+  background: #e8f5ec;
+  color: #216a3a;
+  border: 1.5px solid #8ec6a3;
+}
+
+.confidence-moderate {
+  background: #fff6e9;
+  color: #915f1c;
+  border: 1.5px solid #dcb27a;
+}
+
+.confidence-low {
   background: #fdf0ef;
   color: #9a3f3a;
   border: 1.5px solid #c8746d;
@@ -696,6 +722,19 @@ body {
   padding-left: 1.1rem;
   display: grid;
   gap: 0.35rem;
+}
+
+.limitation-card {
+  border-color: #d4b892;
+  background: #fffbf5;
+}
+
+.limitation-card h3 {
+  margin-top: 1rem;
+}
+
+.limitation-card h3:first-child {
+  margin-top: 0;
 }
 
 .disclaimer {
@@ -764,6 +803,10 @@ body {
 
 .how-note-spaced {
   margin-top: 0.5rem !important;
+}
+
+.how-short-examples {
+  margin-top: 1rem !important;
 }
 
 .how-card ul {

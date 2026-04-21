@@ -157,6 +157,50 @@ export default function HowTrustCheckWorksPage() {
         </section>
 
         <section>
+          <h2>Why people may disagree with a score</h2>
+          <p>
+            TrustCheck evaluates the presentation of support in the content
+            provided to it. It does not determine whether a claim is ultimately
+            true or false in the real world.
+          </p>
+          <p>Because of this:</p>
+          <ul>
+            <li>
+              a claim may be true but weakly supported in the provided text
+            </li>
+            <li>
+              a claim may be misleading in reality while still
+              being presented with relatively strong credibility signals
+            </li>
+            <li>
+              the Trust Score reflects sourcing, evidence, context, and
+              interpretive discipline within the content itself
+            </li>
+          </ul>
+          <p className="how-short-examples">Short examples:</p>
+          <ul>
+            <li>
+              true claim with weak support: "Local air quality improved this
+              year," but the text provides no source, no data, and no timeframe
+            </li>
+            <li>
+              strong-looking claim that still needs outside verification: "A new
+              policy cut fraud by 40%," with a clear chart but no independent
+              source link
+            </li>
+            <li>
+              forceful opinion with insufficient basis: "This approach is
+              obviously the only solution," with persuasive wording but little
+              evidence
+            </li>
+          </ul>
+          <p className="how-note-spaced">
+            TrustCheck is designed to support evaluation of credibility
+            signals, not replace fact-checking or real-world verification.
+          </p>
+        </section>
+
+        <section>
           <h2>What TrustCheck does not do</h2>
           <ul>
             <li>prove something is true</li>

@@ -18,6 +18,8 @@ export type HumanReviewRecommendation =
   | "Recommended"
   | "Strongly recommended";
 
+export type AnalysisConfidence = "High" | "Moderate" | "Low";
+
 export type CategoryLabel = "Strong" | "Good" | "Moderate" | "Weak" | "Poor";
 
 export type CategoryName =
@@ -37,14 +39,21 @@ export interface CategoryBreakdownItem {
 }
 
 export interface TrustCheckAnalysisResult {
-  trustScore: number;
-  trustLevel: TrustLevel;
-  contentTypeGuess: ContentTypeGuess;
-  humanReviewRecommendation: HumanReviewRecommendation;
-  categoryBreakdown: CategoryBreakdownItem[];
-  summary: string;
-  redFlags: string[];
-  verifyNext: string[];
+  analysisStatus: "full" | "limited" | "cannot_score" | "insufficient_basis";
+  trustScore?: number;
+  trustLevel?: TrustLevel;
+  analysisConfidence?: AnalysisConfidence;
+  contentTypeGuess?: ContentTypeGuess;
+  humanReviewRecommendation?: HumanReviewRecommendation;
+  categoryBreakdown?: CategoryBreakdownItem[];
+  summary?: string;
+  redFlags?: string[];
+  verifyNext?: string[];
+  limitationMessage?: string;
+  title?: string;
+  message?: string;
+  possibleReasons?: string[];
+  nextStep?: string;
 }
 
 export interface AnalyzeTrustRequestBody {

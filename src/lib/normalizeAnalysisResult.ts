@@ -1,4 +1,5 @@
 import type {
+  AnalysisConfidence,
   CategoryBreakdownItem,
   CategoryName,
   ContentTypeGuess,
@@ -39,6 +40,12 @@ const REVIEW_RECOMMENDATIONS: HumanReviewRecommendation[] = [
   "Not usually necessary",
   "Recommended",
   "Strongly recommended"
+];
+
+const ANALYSIS_CONFIDENCE_VALUES: AnalysisConfidence[] = [
+  "High",
+  "Moderate",
+  "Low"
 ];
 
 const CATEGORY_LABELS: CategoryBreakdownItem["label"][] = [
@@ -84,6 +91,55 @@ function scoreToLabel(score: CategoryBreakdownItem["score"]): CategoryBreakdownI
 
 export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisResult {
   const data = isObject(payload) ? payload : {};
+  const analysisStatus =
+    data.analysisStatus === "full" ||
+    data.analysisStatus === "limited" ||
+    data.analysisStatus === "insufficient_basis" ||
+    data.analysisStatus === "cannot_score"
+      ? data.analysisStatus
+      : "full";
+
+  if (analysisStatus === "cannot_score" || analysisStatus === "insufficient_basis") {
+    const isInsufficientBasis = analysisStatus === "insufficient_basis";
+    return {
+      analysisStatus,
+      title: toSafeString(
+        data.title,
+        isInsufficientBasis
+          ? "There is not enough information here to generate a meaningful Trust Score"
+          : "Unable to generate a meaningful Trust Score"
+      ),
+      message: toSafeString(
+        data.message,
+        isInsufficientBasis
+          ? "This input is readable, but it does not provide enough specific, credibility-relevant information for TrustCheck to assess sourcing, evidence, context, or interpretation reliably."
+          : "This input does not provide enough evaluable content for TrustCheck to assess credibility signals reliably."
+      ),
+      possibleReasons: toSafeStringArray(
+        data.possibleReasons,
+        isInsufficientBasis
+          ? [
+              "no identifiable claim to evaluate",
+              "no visible source context",
+              "too vague or generalized",
+              "mostly rhetorical or emotional content",
+              "not enough supporting detail"
+            ]
+          : [
+              "too little content",
+              "non-factual or creative format",
+              "fragmented or unreadable text",
+              "unsupported language or format"
+            ]
+      ),
+      nextStep: toSafeString(
+        data.nextStep,
+        isInsufficientBasis
+          ? "Try pasting a longer passage with identifiable claims, context, or supporting information."
+          : "Try pasting a longer passage with identifiable claims, context, or supporting detail."
+      )
+    };
+  }
 
   const trustScoreValue =
     typeof data.trustScore === "number" && Number.isFinite(data.trustScore)
@@ -103,6 +159,14 @@ export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisRes
   )
     ? (data.humanReviewRecommendation as HumanReviewRecommendation)
     : "Recommended";
+
+  const analysisConfidence = ANALYSIS_CONFIDENCE_VALUES.includes(
+    data.analysisConfidence as AnalysisConfidence
+  )
+    ? (data.analysisConfidence as AnalysisConfidence)
+    : analysisStatus === "limited"
+      ? "Low"
+      : "Moderate";
 
   const rawBreakdown = Array.isArray(data.categoryBreakdown) ? data.categoryBreakdown : [];
   const breakdownByName = new Map<CategoryName, CategoryBreakdownItem>();
@@ -134,8 +198,10 @@ export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisRes
   );
 
   return {
+    analysisStatus,
     trustScore: trustScoreValue,
     trustLevel,
+    analysisConfidence,
     contentTypeGuess,
     humanReviewRecommendation,
     categoryBreakdown,
@@ -150,6 +216,13 @@ export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisRes
       "Check the strongest claim against an independent source.",
       "Confirm source attribution for key statements.",
       "Add missing context, limits, or caveats before relying on conclusions."
-    ]).slice(0, 5)
+    ]).slice(0, 5),
+    limitationMessage:
+      analysisStatus === "limited"
+        ? toSafeString(
+            data.limitationMessage,
+            "This content appears technical, specialized, or partially constrained in a way that limits normal trust analysis. TrustCheck can still evaluate some credibility signals, but the result should not be treated as a substitute for domain expertise or full contextual review."
+          )
+        : undefined
   };
 }

@@ -1,4 +1,5 @@
 import type {
+  AnalysisConfidence,
   CategoryBreakdownItem,
   CategoryName,
   ContentTypeGuess,
@@ -12,12 +13,19 @@ type CategoryScoreMap = Record<CategoryName, CategoryBreakdownItem["score"]>;
 
 type GuardrailSignalSet = {
   blockHighTrust: boolean;
+  styleConstraintBlockHighTrust: boolean;
   enforceLimitedOrWeak: boolean;
   enforceStrongReview: boolean;
   enforceRecommendedReview: boolean;
+  capScoreAtLimited: boolean;
+  capScoreAtWeak: boolean;
   addOverstatementFlag: boolean;
   addContextFlag: boolean;
   addContextVerifyStep: boolean;
+  addSubstanceOverStyleFlag: boolean;
+  addSubstanceOverStyleVerifyStep: boolean;
+  addFramingRiskFlag: boolean;
+  addFramingRiskVerifyStep: boolean;
 };
 
 const CATEGORY_WEIGHTS: CategoryWeightMap = {
@@ -32,6 +40,17 @@ const CATEGORY_WEIGHTS: CategoryWeightMap = {
 };
 
 const CATEGORY_ORDER = Object.keys(CATEGORY_WEIGHTS) as CategoryName[];
+const FOUNDATION_CATEGORIES: CategoryName[] = [
+  "Source Visibility",
+  "Evidence Quality",
+  "Fact vs Interpretation",
+  "Context Completeness"
+];
+const STYLE_CATEGORIES: CategoryName[] = [
+  "Claim Discipline",
+  "Confidence Calibration",
+  "Uncertainty Handling"
+];
 
 const SIGNAL_PATTERNS = {
   url: /\b(?:https?:\/\/|www\.)\S+/gi,
@@ -51,6 +70,37 @@ const SIGNAL_PATTERNS = {
   limitationMarker:
     /\b(limitations?|caveat|except|however|depends|unknown|unclear|not enough data)\b/gi
 };
+
+const READABILITY_FUNCTION_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "has",
+  "have",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "were",
+  "with",
+  "according",
+  "report",
+  "data"
+]);
 
 function countMatches(text: string, pattern: RegExp) {
   return text.match(pattern)?.length ?? 0;
@@ -96,6 +146,226 @@ function clampScore(score: number): CategoryBreakdownItem["score"] {
   if (score <= 1) return 1;
   if (score >= 5) return 5;
   return Math.round(score) as CategoryBreakdownItem["score"];
+}
+
+function countSentences(text: string) {
+  return (
+    text
+      .split(/[.!?]+/g)
+      .map((part) => part.trim())
+      .filter((part) => part.length >= 20).length ?? 0
+  );
+}
+
+function hasIdentifiableClaim(text: string) {
+  const normalized = text.toLowerCase();
+  const assertionCue =
+    /\b(is|are|was|were|has|have|had|will|would|shows?|suggests?|indicates?|means?|leads? to|because)\b/;
+  const evaluableCue =
+    /\b(according to|data|study|report|evidence|claim|summary|therefore|however)\b/;
+  return (assertionCue.test(normalized) || evaluableCue.test(normalized)) && text.length >= 60;
+}
+
+function looksLikeCreativeOrNonFactual(text: string) {
+  const normalized = text.toLowerCase();
+  const creativeCues =
+    /\b(poem|poetry|fiction|fictional|satire|satirical|joke|story|once upon a time|chapter)\b/;
+  return creativeCues.test(normalized);
+}
+
+function getAlphabeticTokens(text: string) {
+  return text.toLowerCase().match(/[a-z]+(?:'[a-z]+)*/g) ?? [];
+}
+
+function isRecognizableWordLikeToken(token: string) {
+  if (READABILITY_FUNCTION_WORDS.has(token)) return true;
+  if (token === "i") return true;
+  if (token.length < 2 || token.length > 16) return false;
+
+  const hasVowel = /[aeiouy]/.test(token);
+  const heavyConsonantCluster = /[^aeiouy]{5,}/.test(token);
+  const repeatedNoisePattern = /(.)\1\1\1/.test(token);
+  return hasVowel && !heavyConsonantCluster && !repeatedNoisePattern;
+}
+
+function hasReadableSentenceStructure(text: string, tokens: string[]) {
+  const normalized = text.toLowerCase();
+  const verbCue =
+    /\b(is|are|was|were|has|have|had|will|would|can|could|should|may|might|suggests?|shows?|indicates?)\b/;
+  const functionWordCount = tokens.filter((token) =>
+    READABILITY_FUNCTION_WORDS.has(token)
+  ).length;
+  const clauses = text
+    .split(/[.!?;\n]+/g)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length >= 12);
+
+  const clauseHasStructure = clauses.some((clause) => {
+    const clauseTokens = getAlphabeticTokens(clause);
+    if (clauseTokens.length < 4) return false;
+    const clauseHasFunctionWord = clauseTokens.some((token) =>
+      READABILITY_FUNCTION_WORDS.has(token)
+    );
+    return clauseHasFunctionWord && verbCue.test(clause.toLowerCase());
+  });
+
+  return (
+    clauseHasStructure ||
+    (tokens.length >= 10 && functionWordCount >= 2 && verbCue.test(normalized))
+  );
+}
+
+function looksUnreadableOrFragmented(text: string) {
+  const stripped = text.replace(/\s/g, "");
+  if (stripped.length === 0) return true;
+
+  const letters = (text.match(/[a-z]/gi) ?? []).length;
+  const letterRatio = letters / Math.max(1, stripped.length);
+  const weirdChars = (text.match(/[^\w\s.,;:!?'"()%/\-]/g) ?? []).length;
+  const weirdRatio = weirdChars / Math.max(1, stripped.length);
+  if (letterRatio < 0.45 || weirdRatio > 0.2) return true;
+
+  const tokens = getAlphabeticTokens(text);
+  if (tokens.length === 0) return true;
+  if (tokens.length === 1) return true;
+
+  const recognizableTokenCount = tokens.filter((token) =>
+    isRecognizableWordLikeToken(token)
+  ).length;
+  const recognizableTokenRatio = recognizableTokenCount / tokens.length;
+
+  const fragmentedTokenCount = tokens.filter((token) => {
+    if (token.length <= 2 && token !== "a" && token !== "i") return true;
+    return token.length >= 4 && !/[aeiouy]/.test(token);
+  }).length;
+  const fragmentedTokenRatio = fragmentedTokenCount / tokens.length;
+  const functionWordCount = tokens.filter((token) =>
+    READABILITY_FUNCTION_WORDS.has(token)
+  ).length;
+  const readableStructure = hasReadableSentenceStructure(text, tokens);
+
+  if (tokens.length <= 3 && !readableStructure) {
+    return true;
+  }
+
+  if (tokens.length >= 4 && recognizableTokenRatio < 0.45 && !readableStructure) {
+    return true;
+  }
+
+  if (tokens.length >= 4 && fragmentedTokenRatio > 0.55) {
+    return true;
+  }
+
+  if (tokens.length >= 4 && functionWordCount === 0 && recognizableTokenRatio < 0.35) {
+    return true;
+  }
+
+  return false;
+}
+
+function isHighlyTechnicalOrSpecialized(text: string) {
+  const technicalCueCount = countMatches(
+    text,
+    /\b(protocol|metabolic|jurisdiction|statute|endpoint|cohort|biomarker|regression|variance|interquartile|dosage|comorbidity|liability|contractual|plaintiff|defendant)\b/gi
+  );
+  return technicalCueCount >= 4;
+}
+
+function isPartiallyDegradedButUnderstandable(text: string) {
+  const replacementCharCount = countMatches(text, /�/g);
+  const brokenTokenCount = countMatches(text, /\b[a-z]{0,2}\d+[a-z]{0,2}\b/gi);
+  const sentenceCount = countSentences(text);
+  return (replacementCharCount >= 1 || brokenTokenCount >= 2) && sentenceCount >= 2;
+}
+
+function hasPlausibleReadableClaim(text: string) {
+  const normalized = text.toLowerCase();
+  const tokens = getAlphabeticTokens(text);
+  if (tokens.length < 5) return false;
+
+  const statementVerbCue =
+    /\b(is|are|was|were|has|have|had|shows?|suggests?|indicates?|means?|leads? to|causes?|reduces?|increases?)\b/;
+  const claimCue =
+    /\b(according to|claim|claims|argues?|states?|reports?|because|therefore|however|result)\b/;
+
+  return statementVerbCue.test(normalized) || claimCue.test(normalized);
+}
+
+function isInsufficientBasis(text: string) {
+  const tokens = getAlphabeticTokens(text);
+  const sentenceCount = countSentences(text);
+  const claimLike = hasPlausibleReadableClaim(text);
+
+  const sourceSignals =
+    countMatches(text, SIGNAL_PATTERNS.url) +
+    countMatches(text, SIGNAL_PATTERNS.citationCue) +
+    countMatches(text, SIGNAL_PATTERNS.quote);
+  const supportSignals =
+    countMatches(text, SIGNAL_PATTERNS.number) +
+    countMatches(text, SIGNAL_PATTERNS.factMarker) +
+    countMatches(text, SIGNAL_PATTERNS.contextMarker) +
+    countMatches(text, SIGNAL_PATTERNS.limitationMarker);
+  const credibilitySignalCount = sourceSignals + supportSignals;
+
+  const rhetoricalOrEmotionalSignals = countMatches(
+    text,
+    /\b(feel|believe|opinion|outrage|outrageous|shocking|disgrace|terrible|amazing|obviously|clearly|everyone knows|nobody can deny)\b/gi
+  );
+  const vagueSignals = countMatches(
+    text,
+    /\b(something|anything|everything|nothing|stuff|things|many people|people say|it seems)\b/gi
+  );
+
+  if (!claimLike && tokens.length >= 6) {
+    return true;
+  }
+
+  if (claimLike && credibilitySignalCount === 0 && (tokens.length < 22 || sentenceCount <= 1)) {
+    return true;
+  }
+
+  if (credibilitySignalCount === 0 && (rhetoricalOrEmotionalSignals >= 2 || vagueSignals >= 3)) {
+    return true;
+  }
+
+  if (credibilitySignalCount <= 1 && sentenceCount >= 2 && vagueSignals >= 3) {
+    return true;
+  }
+
+  return false;
+}
+
+function getAnalysisStatus(
+  text: string
+): "full" | "limited" | "cannot_score" | "insufficient_basis" {
+  const trimmed = text.trim();
+  const charCount = trimmed.length;
+  const sentenceCount = countSentences(trimmed);
+  const claimPresent = hasIdentifiableClaim(trimmed);
+  const thresholdPassCount = [charCount >= 100, sentenceCount >= 2, claimPresent].filter(Boolean)
+    .length;
+
+  if (looksUnreadableOrFragmented(trimmed) || looksLikeCreativeOrNonFactual(trimmed)) {
+    return "cannot_score";
+  }
+
+  if (charCount < 45) {
+    return "cannot_score";
+  }
+
+  if (isInsufficientBasis(trimmed)) {
+    return "insufficient_basis";
+  }
+
+  if (thresholdPassCount < 2) {
+    return "insufficient_basis";
+  }
+
+  if (isHighlyTechnicalOrSpecialized(trimmed) || isPartiallyDegradedButUnderstandable(trimmed)) {
+    return "limited";
+  }
+
+  return "full";
 }
 
 function computeCategoryScores(text: string): CategoryScoreMap {
@@ -203,25 +473,87 @@ function computeWeightedTrustScore(scores: CategoryScoreMap) {
 
 function getGuardrailSignals(scores: CategoryScoreMap): GuardrailSignalSet {
   const weakOrPoorCount = CATEGORY_ORDER.filter((category) => scores[category] <= 2).length;
+  const foundationWeakCount = FOUNDATION_CATEGORIES.filter(
+    (category) => scores[category] <= 2
+  ).length;
+  const criticalFoundationWeakCount = ([
+    "Source Visibility",
+    "Evidence Quality",
+    "Fact vs Interpretation"
+  ] as CategoryName[]).filter((category) => scores[category] <= 2).length;
   const hasCriticalOne =
     scores["Source Visibility"] === 1 ||
     scores["Evidence Quality"] === 1 ||
     scores["Fact vs Interpretation"] === 1;
 
+  const foundationAverage =
+    FOUNDATION_CATEGORIES.reduce((sum, category) => sum + scores[category], 0) /
+    FOUNDATION_CATEGORIES.length;
+  const styleAverage =
+    STYLE_CATEGORIES.reduce((sum, category) => sum + scores[category], 0) /
+    STYLE_CATEGORIES.length;
+
   const overstatementRisk =
     scores["Claim Discipline"] <= 2 && scores["Confidence Calibration"] <= 2;
   const lowContext = scores["Context Completeness"] <= 2;
   const lowVerificationBurden = scores["Verification Burden"] <= 2;
+  const selectivePresentationRisk =
+    scores["Evidence Quality"] <= 2 && scores["Context Completeness"] <= 3;
+  const overextendedConclusionRisk =
+    scores["Claim Discipline"] <= 2 && scores["Evidence Quality"] <= 3;
+  const persuasiveFramingOutrunsSupportRisk =
+    scores["Confidence Calibration"] <= 2 && scores["Evidence Quality"] <= 3;
+  const interpretationPresentedAsSettledRisk = scores["Fact vs Interpretation"] <= 2;
+  const framingRisk =
+    selectivePresentationRisk ||
+    overextendedConclusionRisk ||
+    persuasiveFramingOutrunsSupportRisk ||
+    interpretationPresentedAsSettledRisk;
+  const styleConstraintBlockHighTrust =
+    scores["Evidence Quality"] <= 2 || scores["Source Visibility"] <= 2;
+  const capScoreAtWeak = criticalFoundationWeakCount >= 2 || foundationWeakCount >= 3;
+  const capScoreAtLimited =
+    capScoreAtWeak ||
+    criticalFoundationWeakCount >= 1 ||
+    foundationWeakCount >= 2 ||
+    styleConstraintBlockHighTrust;
+  const styleOutrunsSubstance = foundationAverage <= 3 && styleAverage - foundationAverage >= 1;
 
   return {
-    blockHighTrust: hasCriticalOne,
+    blockHighTrust: hasCriticalOne || styleConstraintBlockHighTrust,
+    styleConstraintBlockHighTrust,
     enforceLimitedOrWeak: weakOrPoorCount >= 3,
-    enforceStrongReview: lowVerificationBurden || weakOrPoorCount >= 3 || hasCriticalOne,
+    enforceStrongReview:
+      lowVerificationBurden || weakOrPoorCount >= 3 || hasCriticalOne || capScoreAtLimited,
     enforceRecommendedReview: lowVerificationBurden,
+    capScoreAtLimited,
+    capScoreAtWeak,
     addOverstatementFlag: overstatementRisk,
     addContextFlag: lowContext,
-    addContextVerifyStep: lowContext
+    addContextVerifyStep: lowContext,
+    addSubstanceOverStyleFlag: styleOutrunsSubstance,
+    addSubstanceOverStyleVerifyStep: styleOutrunsSubstance,
+    addFramingRiskFlag: framingRisk,
+    addFramingRiskVerifyStep: framingRisk
   };
+}
+
+function applyTrustScoreGuardrails(rawTrustScore: number, signals: GuardrailSignalSet) {
+  let trustScore = rawTrustScore;
+
+  if (signals.styleConstraintBlockHighTrust && trustScore > 84) {
+    trustScore = 84;
+  }
+
+  if (signals.capScoreAtLimited && trustScore > 69) {
+    trustScore = 69;
+  }
+
+  if (signals.capScoreAtWeak && trustScore > 49) {
+    trustScore = 49;
+  }
+
+  return trustScore;
 }
 
 function applyTrustLevelGuardrails(
@@ -231,6 +563,12 @@ function applyTrustLevelGuardrails(
 ): TrustLevel {
   let trustLevel = baseTrustLevel;
   const weakOrPoorCount = CATEGORY_ORDER.filter((category) => scores[category] <= 2).length;
+
+  if (signals.capScoreAtWeak) {
+    trustLevel = "Weak trust support";
+  } else if (signals.capScoreAtLimited && trustLevel !== "Weak trust support") {
+    trustLevel = "Limited trust support";
+  }
 
   if (signals.blockHighTrust && trustLevel === "High trust support") {
     trustLevel = "Moderate trust support";
@@ -249,6 +587,52 @@ function applyTrustLevelGuardrails(
   }
 
   return trustLevel;
+}
+
+function getAnalysisConfidence(
+  text: string,
+  scores: CategoryScoreMap,
+  analysisStatus: "full" | "limited"
+): AnalysisConfidence {
+  let confidencePoints = analysisStatus === "full" ? 3 : 1;
+
+  const charCount = text.trim().length;
+  const sentenceCount = countSentences(text);
+  const claimPresent = hasIdentifiableClaim(text) || hasPlausibleReadableClaim(text);
+
+  if (charCount >= 400) confidencePoints += 2;
+  else if (charCount >= 180) confidencePoints += 1;
+
+  if (sentenceCount >= 4) confidencePoints += 1;
+  if (claimPresent) confidencePoints += 1;
+
+  const sourceScore = scores["Source Visibility"];
+  const evidenceScore = scores["Evidence Quality"];
+  const contextScore = scores["Context Completeness"];
+  const verificationBurdenScore = scores["Verification Burden"];
+
+  if (sourceScore >= 3) confidencePoints += 1;
+  else if (sourceScore === 1) confidencePoints -= 1;
+
+  if (evidenceScore >= 3) confidencePoints += 1;
+  else if (evidenceScore === 1) confidencePoints -= 1;
+
+  if (contextScore >= 3) confidencePoints += 1;
+  else if (contextScore === 1) confidencePoints -= 1;
+
+  if (verificationBurdenScore === 1) confidencePoints -= 1;
+
+  if (looksUnreadableOrFragmented(text)) confidencePoints -= 2;
+
+  let confidence: AnalysisConfidence = "Low";
+  if (confidencePoints >= 8) confidence = "High";
+  else if (confidencePoints >= 5) confidence = "Moderate";
+
+  if (analysisStatus === "limited" && confidence === "High") {
+    confidence = "Moderate";
+  }
+
+  return confidence;
 }
 
 function reviewStrength(rec: HumanReviewRecommendation) {
@@ -277,7 +661,6 @@ function getHumanReviewRecommendation(
 
   let recommendation: HumanReviewRecommendation = "Recommended";
 
-  // Spec rule: High trust + no major weak categories + verification burden 4/5.
   if (
     trustScore >= 85 &&
     weakCount === 0 &&
@@ -287,7 +670,6 @@ function getHumanReviewRecommendation(
     recommendation = "Not usually necessary";
   }
 
-  // Spec rule: Below 70, verification burden 1/2, or core category weak/poor.
   if (trustScore < 70 || scores["Verification Burden"] <= 2 || coreWeak) {
     recommendation = "Strongly recommended";
   } else if (trustScore >= 70 || (weakCount >= 1 && weakCount <= 2)) {
@@ -361,15 +743,6 @@ function buildRedFlags(scores: CategoryScoreMap, signals: GuardrailSignalSet) {
 
   const redFlags: string[] = [];
 
-  for (const category of CATEGORY_ORDER) {
-    const score = scores[category];
-
-    // Spec rule: <=2 always flagged; 3 flagged only when materially trust-impacting.
-    if (score <= 2 || (score === 3 && materiallySensitiveCategories.has(category))) {
-      redFlags.push(`${category} is currently ${toLabel(score).toLowerCase()}.`);
-    }
-  }
-
   if (signals.addOverstatementFlag) {
     redFlags.push("Overstatement risk: claims may be more certain than the support allows.");
   }
@@ -378,6 +751,25 @@ function buildRedFlags(scores: CategoryScoreMap, signals: GuardrailSignalSet) {
     redFlags.push(
       "Context risk: missing date, scope, or background may materially affect interpretation."
     );
+  }
+
+  if (signals.addSubstanceOverStyleFlag) {
+    redFlags.push(
+      "Substance-over-style risk: confident or polished wording appears stronger than the underlying sourcing, evidence, or factual grounding."
+    );
+  }
+
+  if (signals.addFramingRiskFlag) {
+    redFlags.push(
+      "Framing risk: conclusions or emphasis may extend beyond the evidence and context currently shown."
+    );
+  }
+
+  for (const category of CATEGORY_ORDER) {
+    const score = scores[category];
+    if (score <= 2 || (score === 3 && materiallySensitiveCategories.has(category))) {
+      redFlags.push(`${category} is currently ${toLabel(score).toLowerCase()}.`);
+    }
   }
 
   return Array.from(new Set(redFlags)).slice(0, 6);
@@ -418,6 +810,18 @@ function buildVerifyNext(scores: CategoryScoreMap, signals: GuardrailSignalSet) 
     );
   }
 
+  if (signals.addSubstanceOverStyleVerifyStep) {
+    verifyNext.unshift(
+      "Prioritize source attribution, evidence checks, and fact-versus-interpretation review before relying on polished tone."
+    );
+  }
+
+  if (signals.addFramingRiskVerifyStep) {
+    verifyNext.unshift(
+      "Check for missing context or selectively presented evidence, and separate observed facts from interpretation before relying on conclusions."
+    );
+  }
+
   const deduped = Array.from(new Set(verifyNext));
   const fallbackActions = [
     "Check whether key claims are attributed to specific, identifiable sources.",
@@ -441,11 +845,57 @@ function toCategoryBreakdown(scores: CategoryScoreMap): CategoryBreakdownItem[] 
   }));
 }
 
+function cannotScoreResponse(): TrustCheckAnalysisResult {
+  return {
+    analysisStatus: "cannot_score",
+    title: "Unable to generate a meaningful Trust Score",
+    message:
+      "This input does not provide enough evaluable content for TrustCheck to assess credibility signals reliably.",
+    possibleReasons: [
+      "too little content",
+      "non-factual or creative format",
+      "fragmented or unreadable text",
+      "unsupported language or format"
+    ],
+    nextStep:
+      "Try pasting a longer passage with identifiable claims, context, or supporting detail."
+  };
+}
+
+function insufficientBasisResponse(): TrustCheckAnalysisResult {
+  return {
+    analysisStatus: "insufficient_basis",
+    title: "There is not enough information here to generate a meaningful Trust Score",
+    message:
+      "This input is readable, but it does not provide enough specific, credibility-relevant information for TrustCheck to assess sourcing, evidence, context, or interpretation reliably.",
+    possibleReasons: [
+      "no identifiable claim to evaluate",
+      "no visible source context",
+      "too vague or generalized",
+      "mostly rhetorical or emotional content",
+      "not enough supporting detail"
+    ],
+    nextStep:
+      "Try pasting a longer passage with identifiable claims, context, or supporting information."
+  };
+}
+
 export function analyzeTextPlaceholder(text: string): TrustCheckAnalysisResult {
   const trimmed = text.trim();
+  const analysisStatus = getAnalysisStatus(trimmed);
+
+  if (analysisStatus === "cannot_score") {
+    return cannotScoreResponse();
+  }
+
+  if (analysisStatus === "insufficient_basis") {
+    return insufficientBasisResponse();
+  }
+
   const scores = computeCategoryScores(trimmed);
-  const trustScore = computeWeightedTrustScore(scores);
   const signals = getGuardrailSignals(scores);
+  const rawTrustScore = computeWeightedTrustScore(scores);
+  const trustScore = applyTrustScoreGuardrails(rawTrustScore, signals);
 
   const baseTrustLevel = getTrustLevelFromScore(trustScore);
   const trustLevel = applyTrustLevelGuardrails(scores, baseTrustLevel, signals);
@@ -455,10 +905,13 @@ export function analyzeTextPlaceholder(text: string): TrustCheckAnalysisResult {
     signals
   );
   const contentTypeGuess = guessContentType(trimmed);
+  const analysisConfidence = getAnalysisConfidence(trimmed, scores, analysisStatus);
 
-  return {
+  const result: TrustCheckAnalysisResult = {
+    analysisStatus,
     trustScore,
     trustLevel,
+    analysisConfidence,
     contentTypeGuess,
     humanReviewRecommendation,
     categoryBreakdown: toCategoryBreakdown(scores),
@@ -471,4 +924,11 @@ export function analyzeTextPlaceholder(text: string): TrustCheckAnalysisResult {
     redFlags: buildRedFlags(scores, signals),
     verifyNext: buildVerifyNext(scores, signals)
   };
+
+  if (analysisStatus === "limited") {
+    result.limitationMessage =
+      "This content appears technical, specialized, or partially constrained in a way that limits normal trust analysis. TrustCheck can still evaluate some credibility signals, but the result should not be treated as a substitute for domain expertise or full contextual review.";
+  }
+
+  return result;
 }

@@ -41,10 +41,12 @@ export async function POST(request: Request) {
     }
 
     let analysisInputText = text;
+    let usedUrlExtraction = false;
 
     if (!analysisInputText && url) {
       try {
         analysisInputText = await extractReadableTextFromUrl(url);
+        usedUrlExtraction = true;
       } catch (error) {
         const detail = error instanceof Error ? error.message : "";
         return NextResponse.json(
@@ -59,6 +61,25 @@ export async function POST(request: Request) {
     }
 
     const result = analyzeTextPlaceholder(analysisInputText);
+
+    if (
+      usedUrlExtraction &&
+      (result.analysisStatus === "cannot_score" ||
+        result.analysisStatus === "insufficient_basis")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "We couldn't extract enough usable article text from that URL. Please paste the article text manually and try again.",
+          detail:
+            result.analysisStatus === "cannot_score"
+              ? "Extracted content was not meaningfully analyzable."
+              : "Extracted content was readable but lacked enough credibility-relevant detail."
+        },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(result, { status: 200 });
   } catch {
     return NextResponse.json(

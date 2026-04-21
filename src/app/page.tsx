@@ -15,6 +15,10 @@ function joinWithAnd(items: string[]) {
 }
 
 function getHumanReviewReason(result: TrustCheckAnalysisResult) {
+  if (!result.categoryBreakdown || !result.humanReviewRecommendation) {
+    return "Recommendation detail is not available for this analysis.";
+  }
+
   const scoreByCategory = new Map(
     result.categoryBreakdown.map((category) => [category.name, category.score] as const)
   );
@@ -34,7 +38,7 @@ function getHumanReviewReason(result: TrustCheckAnalysisResult) {
   }
 
   const reasons: string[] = [];
-  if (result.trustScore < 70) {
+  if ((result.trustScore ?? 0) < 70) {
     reasons.push("the overall trust score is below 70");
   }
   if (verificationBurden <= 2) {
@@ -56,16 +60,25 @@ function getHumanReviewReason(result: TrustCheckAnalysisResult) {
 }
 
 function getWeakCategoryNames(result: TrustCheckAnalysisResult) {
-  return result.categoryBreakdown
+  return (result.categoryBreakdown ?? [])
     .filter((category) => category.score <= 2)
     .map((category) => category.name);
 }
 
 function trustLevelClass(level: TrustCheckAnalysisResult["trustLevel"]) {
+  if (!level) return "trust-weak";
   if (level === "High trust support") return "trust-high";
   if (level === "Moderate trust support") return "trust-moderate";
   if (level === "Limited trust support") return "trust-limited";
   return "trust-weak";
+}
+
+function analysisConfidenceClass(
+  confidence: TrustCheckAnalysisResult["analysisConfidence"]
+) {
+  if (confidence === "High") return "confidence-high";
+  if (confidence === "Moderate") return "confidence-moderate";
+  return "confidence-low";
 }
 
 function categoryMeterClass(score: 1 | 2 | 3 | 4 | 5) {
@@ -382,8 +395,29 @@ export default function HomePage() {
                     Submit text or a public article URL to generate a structured
                     TrustCheck analysis.
                   </p>
+                ) : analysisResult.analysisStatus === "cannot_score" ||
+                  analysisResult.analysisStatus === "insufficient_basis" ? (
+                  <article className="result-panel full-width limitation-card">
+                    <h3>{analysisResult.title}</h3>
+                    <p>{analysisResult.message}</p>
+                    <h3>Possible Reasons</h3>
+                    <ul>
+                      {(analysisResult.possibleReasons ?? []).map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                    <h3>Next Step</h3>
+                    <p>{analysisResult.nextStep}</p>
+                  </article>
                 ) : (
                   <>
+                    {analysisResult.analysisStatus === "limited" &&
+                    analysisResult.limitationMessage ? (
+                      <article className="result-panel full-width limitation-card">
+                        <h3>Limited Analysis</h3>
+                        <p>{analysisResult.limitationMessage}</p>
+                      </article>
+                    ) : null}
                     <div className="results-top">
                       <article className="result-panel score-panel score-panel-large">
                         <div className="score-heading-row">
@@ -415,7 +449,7 @@ export default function HomePage() {
                             </div>
                           </div>
                         </div>
-                        <p className="score-value">{analysisResult.trustScore}</p>
+                        <p className="score-value">{analysisResult.trustScore ?? "N/A"}</p>
                         <p className="score-scale">Scored on a 0-100 range</p>
                         <h3>Trust Level</h3>
                         <p
@@ -423,13 +457,21 @@ export default function HomePage() {
                             analysisResult.trustLevel
                           )}`}
                         >
-                          {analysisResult.trustLevel}
+                          {analysisResult.trustLevel ?? "Unavailable"}
+                        </p>
+                        <h3>Analysis Confidence</h3>
+                        <p
+                          className={`confidence-pill ${analysisConfidenceClass(
+                            analysisResult.analysisConfidence
+                          )}`}
+                        >
+                          {analysisResult.analysisConfidence ?? "Moderate"}
                         </p>
                       </article>
 
                       <article className="result-panel summary-status">
                         <h3>Human Review Recommendation</h3>
-                        <p>{analysisResult.humanReviewRecommendation}</p>
+                        <p>{analysisResult.humanReviewRecommendation ?? "Unavailable"}</p>
                         <p className="review-reason">
                           <strong>Why:</strong> {getHumanReviewReason(analysisResult)}
                         </p>
@@ -451,7 +493,7 @@ export default function HomePage() {
                     <article className="result-panel full-width">
                       <h3>Category Breakdown</h3>
                       <div className="category-list">
-                        {analysisResult.categoryBreakdown.map((category) => (
+                        {(analysisResult.categoryBreakdown ?? []).map((category) => (
                           <div className="category-row" key={category.name}>
                             <p className="category-name">{category.name}</p>
                             <div className="category-meter-wrap" aria-hidden="true">
@@ -471,14 +513,14 @@ export default function HomePage() {
 
                     <article className="result-panel full-width">
                       <h3>Summary</h3>
-                      <p>{analysisResult.summary}</p>
+                      <p>{analysisResult.summary ?? "Summary unavailable."}</p>
                     </article>
 
                     <div className="results-grid">
                       <article className="result-panel">
                         <h3>Red Flags</h3>
                         <ul>
-                          {analysisResult.redFlags.map((flag) => (
+                          {(analysisResult.redFlags ?? []).map((flag) => (
                             <li key={flag}>{flag}</li>
                           ))}
                         </ul>
@@ -487,7 +529,7 @@ export default function HomePage() {
                       <article className="result-panel">
                         <h3>Verify Next</h3>
                         <ol>
-                          {analysisResult.verifyNext.map((step) => (
+                          {(analysisResult.verifyNext ?? []).map((step) => (
                             <li key={step}>{step}</li>
                           ))}
                         </ol>
@@ -496,7 +538,7 @@ export default function HomePage() {
 
                     <article className="result-panel full-width">
                       <h3>Content Type Guess</h3>
-                      <p>{analysisResult.contentTypeGuess}</p>
+                      <p>{analysisResult.contentTypeGuess ?? "mixed/unclear"}</p>
                     </article>
                   </>
                 )}
