@@ -19,6 +19,7 @@ export type HumanReviewRecommendation =
   | "Strongly recommended";
 
 export type AnalysisConfidence = "High" | "Moderate" | "Low";
+export type HighStakesCategory = "medical" | "legal" | "financial" | "safety_critical";
 
 export type CategoryLabel = "Strong" | "Good" | "Moderate" | "Weak" | "Poor";
 
@@ -43,6 +44,9 @@ export interface TrustCheckAnalysisResult {
   trustScore?: number;
   trustLevel?: TrustLevel;
   analysisConfidence?: AnalysisConfidence;
+  highStakesWarning?: boolean;
+  highStakesCategory?: HighStakesCategory | null;
+  highStakesMessage?: string | null;
   contentTypeGuess?: ContentTypeGuess;
   humanReviewRecommendation?: HumanReviewRecommendation;
   categoryBreakdown?: CategoryBreakdownItem[];

@@ -3,6 +3,7 @@ import type {
   CategoryBreakdownItem,
   CategoryName,
   ContentTypeGuess,
+  HighStakesCategory,
   HumanReviewRecommendation,
   TrustCheckAnalysisResult,
   TrustLevel
@@ -51,6 +52,9 @@ const STYLE_CATEGORIES: CategoryName[] = [
   "Confidence Calibration",
   "Uncertainty Handling"
 ];
+
+const HIGH_STAKES_FULL_WARNING =
+  "This content may relate to medical, legal, financial, or safety-critical decisions. TrustCheck evaluates credibility signals, but it is not a substitute for qualified professional advice or direct verification against authoritative sources.";
 
 const SIGNAL_PATTERNS = {
   url: /\b(?:https?:\/\/|www\.)\S+/gi,
@@ -160,10 +164,14 @@ function countSentences(text: string) {
 function hasIdentifiableClaim(text: string) {
   const normalized = text.toLowerCase();
   const assertionCue =
-    /\b(is|are|was|were|has|have|had|will|would|shows?|suggests?|indicates?|means?|leads? to|because)\b/;
+    /\b(is|are|was|were|has|have|had|will|would|shows?|suggests?|indicates?|means?|leads? to|because|includes?|requires?|supports?|reflects?|emphasizes?|stresses?|recommends?|estimates?|projects?)\b/;
   const evaluableCue =
     /\b(according to|data|study|report|evidence|claim|summary|therefore|however)\b/;
-  return (assertionCue.test(normalized) || evaluableCue.test(normalized)) && text.length >= 60;
+  const quantitativeCue = /\b\d+(?:\.\d+)?%?\b/;
+  return (
+    (assertionCue.test(normalized) || evaluableCue.test(normalized) || quantitativeCue.test(text)) &&
+    text.length >= 60
+  );
 }
 
 function looksLikeCreativeOrNonFactual(text: string) {
@@ -284,11 +292,16 @@ function hasPlausibleReadableClaim(text: string) {
   if (tokens.length < 5) return false;
 
   const statementVerbCue =
-    /\b(is|are|was|were|has|have|had|shows?|suggests?|indicates?|means?|leads? to|causes?|reduces?|increases?)\b/;
+    /\b(is|are|was|were|has|have|had|shows?|suggests?|indicates?|means?|leads? to|causes?|reduces?|increases?|includes?|requires?|supports?|reflects?|emphasizes?|stresses?|recommends?|estimates?|projects?)\b/;
   const claimCue =
     /\b(according to|claim|claims|argues?|states?|reports?|because|therefore|however|result)\b/;
+  const quantitativeCue = /\b\d+(?:\.\d+)?%?\b/;
 
-  return statementVerbCue.test(normalized) || claimCue.test(normalized);
+  return (
+    statementVerbCue.test(normalized) ||
+    claimCue.test(normalized) ||
+    (quantitativeCue.test(text) && tokens.length >= 10)
+  );
 }
 
 function isInsufficientBasis(text: string) {
@@ -316,7 +329,7 @@ function isInsufficientBasis(text: string) {
     /\b(something|anything|everything|nothing|stuff|things|many people|people say|it seems)\b/gi
   );
 
-  if (!claimLike && tokens.length >= 6) {
+  if (!claimLike && tokens.length >= 6 && credibilitySignalCount <= 1 && sentenceCount <= 1) {
     return true;
   }
 
@@ -635,6 +648,46 @@ function getAnalysisConfidence(
   return confidence;
 }
 
+function detectHighStakesCategory(text: string): HighStakesCategory | null {
+  const normalized = text.toLowerCase();
+  const medicalPattern =
+    /\b(medical|medicine|medications?|medicate(?:d|s|ing)?|dose|doses|dosage|diagnos(?:is|e|es|ed|ing)|treat(?:ment|ments|ed|ing|s)|therap(?:y|ies)|surgery|surgeries|symptom|symptoms|patient|patients|clinical|hospital|physician|doctor|doctors|doc|healthcare|health care|health condition|prescriptions?|blood pressure|bp|hypertension|ace inhibitor|arb|diuretic|side effects?)\b/;
+  const legalPattern =
+    /\b(legal|law|lawsuit|litigation|attorney|lawyer|statute|regulation|contract|liability|court|judge|compliance|jurisdiction|plaintiff|defendant)\b/;
+  const financialPattern =
+    /\b(financial|finance|investment|investor|portfolio|stock|securities|retirement|mortgage|loan|debt|tax|interest rate|budget|profit|loss)\b/;
+  const safetyCriticalPattern =
+    /\b(safety|hazard|danger|emergency|evacuation|fire|electrical|gas leak|explosive|critical procedure|protective equipment|injury prevention|operating procedure)\b/;
+
+  if (medicalPattern.test(normalized)) {
+    return "medical";
+  }
+  if (legalPattern.test(normalized)) {
+    return "legal";
+  }
+  if (financialPattern.test(normalized)) {
+    return "financial";
+  }
+  if (safetyCriticalPattern.test(normalized)) {
+    return "safety_critical";
+  }
+
+  return null;
+}
+
+function buildHighStakesFields(
+  highStakesCategory: HighStakesCategory | null
+): Pick<
+  TrustCheckAnalysisResult,
+  "highStakesWarning" | "highStakesCategory" | "highStakesMessage"
+> {
+  return {
+    highStakesWarning: highStakesCategory !== null,
+    highStakesCategory,
+    highStakesMessage: highStakesCategory !== null ? HIGH_STAKES_FULL_WARNING : null
+  };
+}
+
 function reviewStrength(rec: HumanReviewRecommendation) {
   if (rec === "Not usually necessary") return 1;
   if (rec === "Recommended") return 2;
@@ -845,9 +898,12 @@ function toCategoryBreakdown(scores: CategoryScoreMap): CategoryBreakdownItem[] 
   }));
 }
 
-function cannotScoreResponse(): TrustCheckAnalysisResult {
+function cannotScoreResponse(
+  highStakesCategory: HighStakesCategory | null
+): TrustCheckAnalysisResult {
   return {
     analysisStatus: "cannot_score",
+    ...buildHighStakesFields(highStakesCategory),
     title: "Unable to generate a meaningful Trust Score",
     message:
       "This input does not provide enough evaluable content for TrustCheck to assess credibility signals reliably.",
@@ -862,9 +918,12 @@ function cannotScoreResponse(): TrustCheckAnalysisResult {
   };
 }
 
-function insufficientBasisResponse(): TrustCheckAnalysisResult {
+function insufficientBasisResponse(
+  highStakesCategory: HighStakesCategory | null
+): TrustCheckAnalysisResult {
   return {
     analysisStatus: "insufficient_basis",
+    ...buildHighStakesFields(highStakesCategory),
     title: "There is not enough information here to generate a meaningful Trust Score",
     message:
       "This input is readable, but it does not provide enough specific, credibility-relevant information for TrustCheck to assess sourcing, evidence, context, or interpretation reliably.",
@@ -882,14 +941,15 @@ function insufficientBasisResponse(): TrustCheckAnalysisResult {
 
 export function analyzeTextPlaceholder(text: string): TrustCheckAnalysisResult {
   const trimmed = text.trim();
+  const highStakesCategory = detectHighStakesCategory(trimmed);
   const analysisStatus = getAnalysisStatus(trimmed);
 
   if (analysisStatus === "cannot_score") {
-    return cannotScoreResponse();
+    return cannotScoreResponse(highStakesCategory);
   }
 
   if (analysisStatus === "insufficient_basis") {
-    return insufficientBasisResponse();
+    return insufficientBasisResponse(highStakesCategory);
   }
 
   const scores = computeCategoryScores(trimmed);
@@ -912,6 +972,7 @@ export function analyzeTextPlaceholder(text: string): TrustCheckAnalysisResult {
     trustScore,
     trustLevel,
     analysisConfidence,
+    ...buildHighStakesFields(highStakesCategory),
     contentTypeGuess,
     humanReviewRecommendation,
     categoryBreakdown: toCategoryBreakdown(scores),

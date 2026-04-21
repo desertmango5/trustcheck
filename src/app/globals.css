@@ -737,6 +737,16 @@ body {
   margin-top: 0;
 }
 
+.high-stakes-card {
+  border-color: #e3c593;
+  background: #fff9ef;
+}
+
+.high-stakes-short {
+  font-weight: 600;
+  margin-bottom: 0.5rem !important;
+}
+
 .disclaimer {
   margin-top: 0.45rem;
   font-size: 12px;

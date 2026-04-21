@@ -89,6 +89,21 @@ function categoryMeterClass(score: 1 | 2 | 3 | 4 | 5) {
   return "meter-score-1";
 }
 
+function renderHighStakesWarning(result: TrustCheckAnalysisResult) {
+  if (!result.highStakesWarning || !result.highStakesMessage) return null;
+
+  return (
+    <article className="result-panel full-width high-stakes-card">
+      <h3>High-Stakes Use Warning</h3>
+      <p className="high-stakes-short">
+        For high-stakes decisions, verify against qualified sources or
+        professionals.
+      </p>
+      <p>{result.highStakesMessage}</p>
+    </article>
+  );
+}
+
 export default function HomePage() {
   const [inputText, setInputText] = useState("");
   const [inputUrl, setInputUrl] = useState("");
@@ -397,18 +412,21 @@ export default function HomePage() {
                   </p>
                 ) : analysisResult.analysisStatus === "cannot_score" ||
                   analysisResult.analysisStatus === "insufficient_basis" ? (
-                  <article className="result-panel full-width limitation-card">
-                    <h3>{analysisResult.title}</h3>
-                    <p>{analysisResult.message}</p>
-                    <h3>Possible Reasons</h3>
-                    <ul>
-                      {(analysisResult.possibleReasons ?? []).map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                    <h3>Next Step</h3>
-                    <p>{analysisResult.nextStep}</p>
-                  </article>
+                  <>
+                    <article className="result-panel full-width limitation-card">
+                      <h3>{analysisResult.title}</h3>
+                      <p>{analysisResult.message}</p>
+                      <h3>Possible Reasons</h3>
+                      <ul>
+                        {(analysisResult.possibleReasons ?? []).map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                      <h3>Next Step</h3>
+                      <p>{analysisResult.nextStep}</p>
+                    </article>
+                    {renderHighStakesWarning(analysisResult)}
+                  </>
                 ) : (
                   <>
                     {analysisResult.analysisStatus === "limited" &&
@@ -418,6 +436,7 @@ export default function HomePage() {
                         <p>{analysisResult.limitationMessage}</p>
                       </article>
                     ) : null}
+                    {renderHighStakesWarning(analysisResult)}
                     <div className="results-top">
                       <article className="result-panel score-panel score-panel-large">
                         <div className="score-heading-row">

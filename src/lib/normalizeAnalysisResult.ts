@@ -3,6 +3,7 @@ import type {
   CategoryBreakdownItem,
   CategoryName,
   ContentTypeGuess,
+  HighStakesCategory,
   HumanReviewRecommendation,
   TrustCheckAnalysisResult,
   TrustLevel
@@ -47,6 +48,15 @@ const ANALYSIS_CONFIDENCE_VALUES: AnalysisConfidence[] = [
   "Moderate",
   "Low"
 ];
+
+const HIGH_STAKES_CATEGORIES: HighStakesCategory[] = [
+  "medical",
+  "legal",
+  "financial",
+  "safety_critical"
+];
+const HIGH_STAKES_FULL_WARNING_FALLBACK =
+  "This content may relate to medical, legal, financial, or safety-critical decisions. TrustCheck evaluates credibility signals, but it is not a substitute for qualified professional advice or direct verification against authoritative sources.";
 
 const CATEGORY_LABELS: CategoryBreakdownItem["label"][] = [
   "Strong",
@@ -101,8 +111,20 @@ export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisRes
 
   if (analysisStatus === "cannot_score" || analysisStatus === "insufficient_basis") {
     const isInsufficientBasis = analysisStatus === "insufficient_basis";
+    const highStakesWarning = data.highStakesWarning === true;
+    const highStakesCategory = HIGH_STAKES_CATEGORIES.includes(
+      data.highStakesCategory as HighStakesCategory
+    )
+      ? (data.highStakesCategory as HighStakesCategory)
+      : null;
+    const highStakesMessage = highStakesWarning
+      ? toSafeString(data.highStakesMessage, HIGH_STAKES_FULL_WARNING_FALLBACK)
+      : null;
     return {
       analysisStatus,
+      highStakesWarning,
+      highStakesCategory,
+      highStakesMessage,
       title: toSafeString(
         data.title,
         isInsufficientBasis
@@ -168,6 +190,17 @@ export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisRes
       ? "Low"
       : "Moderate";
 
+  const highStakesWarning = data.highStakesWarning === true;
+  const highStakesCategory = HIGH_STAKES_CATEGORIES.includes(
+    data.highStakesCategory as HighStakesCategory
+  )
+    ? (data.highStakesCategory as HighStakesCategory)
+    : null;
+  const highStakesMessage =
+    highStakesWarning
+      ? toSafeString(data.highStakesMessage, HIGH_STAKES_FULL_WARNING_FALLBACK)
+      : null;
+
   const rawBreakdown = Array.isArray(data.categoryBreakdown) ? data.categoryBreakdown : [];
   const breakdownByName = new Map<CategoryName, CategoryBreakdownItem>();
 
@@ -202,6 +235,9 @@ export function normalizeAnalysisResult(payload: unknown): TrustCheckAnalysisRes
     trustScore: trustScoreValue,
     trustLevel,
     analysisConfidence,
+    highStakesWarning,
+    highStakesCategory,
+    highStakesMessage,
     contentTypeGuess,
     humanReviewRecommendation,
     categoryBreakdown,
