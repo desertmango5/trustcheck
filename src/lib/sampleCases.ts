@@ -69,5 +69,40 @@ export const TRUSTCHECK_SAMPLE_CASES: TrustCheckSampleCase[] = [
     expectedScoreBehavior:
       "Should trend in the moderate range with stronger marks for structure and uncertainty handling.",
     expectedWeakCategories: ["Source Visibility", "Verification Burden"]
+  },
+  {
+    id: "hedging-justified-uncertainty",
+    title: "Justified Uncertainty With Clear Support",
+    description:
+      "Cautious wording is paired with identifiable sources, evidence, and context.",
+    text: `According to the county public health dashboard (https://countyhealth.example.gov/dashboard) and a university report published in February 2026 (https://research.example.edu/respiratory-report-2026), emergency visits for asthma may have declined by about 9% after school ventilation upgrades. The report includes district-level data from 37 schools and notes that wildfire smoke variation could also influence outcomes. The authors state that the trend appears consistent, but they recommend another season of follow-up before drawing broader conclusions.`,
+    expectedScoreBehavior:
+      "Should not be penalized for hedging because uncertainty language is supported by named sources, evidence, and context.",
+    expectedWeakCategories: ["Verification Burden"]
+  },
+  {
+    id: "hedging-evasive-vagueness",
+    title: "Evasive Vagueness With Selective Hedging",
+    description:
+      "Indirect claims use heavy hedging while stronger claims are stated confidently without support.",
+    text: `Some experts say there may be concerns about the safety data, and observers suggest it could be argued that key reports are being withheld. Questions have been raised, and it is possible that reviewers are worried, but no documents are named. At the same time, this policy definitely works and will protect everyone, so there is no reason to question it.`,
+    expectedScoreBehavior:
+      "Should trigger hedging-distribution red flags and trend lower due to weak sourcing, weak evidence, and uneven confidence.",
+    expectedWeakCategories: [
+      "Source Visibility",
+      "Evidence Quality",
+      "Confidence Calibration",
+      "Claim Discipline"
+    ]
+  },
+  {
+    id: "hedging-mixed-legitimate-and-suspicious",
+    title: "Mixed Hedging: Legitimate and Suspicious",
+    description:
+      "Some caveats are responsible, but other hedged claims avoid accountability.",
+    text: `A March 2026 audit summary says processing delays fell by 14% after workflow changes, based on weekly operational logs from three regions. The report notes that the estimate may shift after final reconciliation, which is reasonable. However, some people say there may be broader compliance concerns and it is possible that key failures were hidden, but the text does not identify who made those claims or cite evidence.`,
+    expectedScoreBehavior:
+      "Should show a mixed result: legitimate uncertainty is recognized, but selective vague hedging should reduce calibration confidence and add a targeted red flag.",
+    expectedWeakCategories: ["Confidence Calibration", "Source Visibility"]
   }
 ];

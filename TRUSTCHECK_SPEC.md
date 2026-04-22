@@ -194,6 +194,8 @@ Overall score = sum of all category contributions, resulting in a value from 0 t
 ### 4. Confidence Calibration
 **Question:** Does the language match the strength of the evidence?
 
+**Hedging Distribution sub-signal:** TrustCheck evaluates not just whether uncertainty language appears, but how it is distributed. Cautious wording helps credibility only when paired with clear claims, identifiable sources, and meaningful supporting context. Selective hedging around weak, vague, or unsupported claims may count against the analysis rather than in its favor.
+
 - **5 Strong:** Tone is appropriately calibrated; strong claims are made only when support is strong; tentative matters are framed with caution.
 - **4 Good:** Language is mostly aligned with the evidence; minor overconfidence may appear, but calibration is generally good.
 - **3 Moderate:** Language is somewhat mismatched to support; content occasionally sounds more certain than the evidence warrants.

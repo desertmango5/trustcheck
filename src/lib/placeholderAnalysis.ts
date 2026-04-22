@@ -27,6 +27,16 @@ type GuardrailSignalSet = {
   addSubstanceOverStyleVerifyStep: boolean;
   addFramingRiskFlag: boolean;
   addFramingRiskVerifyStep: boolean;
+  addAsymmetricHedgingFlag: boolean;
+  addEvasiveVaguenessFlag: boolean;
+  addHedgingVerifyStep: boolean;
+};
+
+type HedgingDistributionSignals = {
+  highHedgingWithWeakSpecificity: boolean;
+  asymmetricHedging: boolean;
+  strongAsymmetricHedging: boolean;
+  evasiveVagueness: boolean;
 };
 
 const CATEGORY_WEIGHTS: CategoryWeightMap = {
@@ -72,8 +82,23 @@ const SIGNAL_PATTERNS = {
   contextMarker:
     /\b(in \d{4}|between|from \d{4}|during|within|scope|sample|region|country|state|city|timeframe|baseline|compared with)\b/gi,
   limitationMarker:
-    /\b(limitations?|caveat|except|however|depends|unknown|unclear|not enough data)\b/gi
+    /\b(limitations?|caveat|except|however|depends|unknown|unclear|not enough data)\b/gi,
+  unnamedActor:
+    /\b(some people|some experts|observers|critics|analysts|commentators|many believe|many say)\b/gi,
+  softUnsupportedClaim:
+    /\b(there may be concerns|questions have been raised|it could be argued|it is possible that|it seems that|it has been suggested)\b/gi
 };
+
+const HEDGE_IN_CLAUSE_PATTERN =
+  /\b(may|might|could|possibly|appears?|likely|unlikely|uncertain|estimate|estimated|approximately|potentially|suggests?)\b/i;
+const STRONG_CONFIDENCE_CLAUSE_PATTERN =
+  /\b(always|never|definitely|clearly|must|will|proves?|settled|undeniably|guaranteed?)\b/i;
+const SPECIFIC_SUPPORT_CLAUSE_PATTERN =
+  /\b(according to|source|sources|study|studies|report|reports|data|dataset|citation|citations|documented|published|recorded|measured|between|from \d{4}|in \d{4}|sample|baseline)\b|https?:\/\/|www\.|\b\d+(?:\.\d+)?%?\b/i;
+const UNNAMED_ACTOR_CLAUSE_PATTERN =
+  /\b(some people|some experts|observers|critics|analysts|commentators|many believe|many say)\b/i;
+const SOFT_UNSUPPORTED_CLAUSE_PATTERN =
+  /\b(there may be concerns|questions have been raised|it could be argued|it is possible that|it seems that|it has been suggested)\b/i;
 
 const READABILITY_FUNCTION_WORDS = new Set([
   "a",
@@ -381,7 +406,61 @@ function getAnalysisStatus(
   return "full";
 }
 
-function computeCategoryScores(text: string): CategoryScoreMap {
+function analyzeHedgingDistribution(
+  text: string,
+  sourceSignalCount: number,
+  evidenceSignal: number,
+  contextCount: number,
+  hedgeCount: number
+): HedgingDistributionSignals {
+  const unnamedActorCount = countMatches(text, SIGNAL_PATTERNS.unnamedActor);
+  const softUnsupportedClaimCount = countMatches(text, SIGNAL_PATTERNS.softUnsupportedClaim);
+  const clauses = text
+    .split(/[.!?;\n]+/g)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length >= 18);
+
+  const hedgedWeakClauseCount = clauses.filter((clause) => {
+    const hasHedging = HEDGE_IN_CLAUSE_PATTERN.test(clause);
+    const hasSpecificSupport = SPECIFIC_SUPPORT_CLAUSE_PATTERN.test(clause);
+    const hasUnaccountableCue =
+      UNNAMED_ACTOR_CLAUSE_PATTERN.test(clause) ||
+      SOFT_UNSUPPORTED_CLAUSE_PATTERN.test(clause);
+    return hasHedging && (!hasSpecificSupport || hasUnaccountableCue);
+  }).length;
+  const confidentClauseCount = clauses.filter((clause) =>
+    STRONG_CONFIDENCE_CLAUSE_PATTERN.test(clause)
+  ).length;
+
+  const weakSpecificity =
+    sourceSignalCount <= 1 && evidenceSignal <= 3 && contextCount <= 1;
+  const highHedging = hedgeCount >= 3 || (hedgeCount >= 2 && hedgedWeakClauseCount >= 2);
+  const asymmetricHedging =
+    hedgedWeakClauseCount >= 1 &&
+    confidentClauseCount >= 1 &&
+    hedgedWeakClauseCount >= confidentClauseCount;
+  const strongAsymmetricHedging =
+    hedgedWeakClauseCount >= 2 &&
+    confidentClauseCount >= 1 &&
+    (weakSpecificity || unnamedActorCount + softUnsupportedClaimCount >= 2);
+  const evasiveVagueness =
+    unnamedActorCount + softUnsupportedClaimCount >= 2 ||
+    (hedgedWeakClauseCount >= 2 && weakSpecificity);
+  const highHedgingWithWeakSpecificity =
+    highHedging && (weakSpecificity || evasiveVagueness);
+
+  return {
+    highHedgingWithWeakSpecificity,
+    asymmetricHedging,
+    strongAsymmetricHedging,
+    evasiveVagueness
+  };
+}
+
+function computeCategoryScores(text: string): {
+  scores: CategoryScoreMap;
+  hedgingSignals: HedgingDistributionSignals;
+} {
   const wordCount = text.trim() === "" ? 0 : text.trim().split(/\s+/).length;
 
   const urlCount = countMatches(text, SIGNAL_PATTERNS.url);
@@ -395,6 +474,7 @@ function computeCategoryScores(text: string): CategoryScoreMap {
   const factCount = countMatches(text, SIGNAL_PATTERNS.factMarker);
   const contextCount = countMatches(text, SIGNAL_PATTERNS.contextMarker);
   const limitationCount = countMatches(text, SIGNAL_PATTERNS.limitationMarker);
+  const sourceSignalCount = urlCount + citationCueCount + quoteCount;
 
   let sourceVisibility = 1;
   if (urlCount >= 2 && citationCueCount >= 3) sourceVisibility = 5;
@@ -415,13 +495,44 @@ function computeCategoryScores(text: string): CategoryScoreMap {
   else if (absoluteCount >= 2) claimDiscipline = 3;
   else if (absoluteCount === 1) claimDiscipline = 4;
 
-  const confidenceMismatch =
-    absoluteCount - Math.min(hedgeCount, 3) + (evidenceSignal < 4 ? 1 : 0);
+  const hedgingSignals = analyzeHedgingDistribution(
+    text,
+    sourceSignalCount,
+    evidenceSignal,
+    contextCount,
+    hedgeCount
+  );
+
+  const canUseHedgingAsCalibrationSupport =
+    hedgeCount > 0 &&
+    sourceVisibility >= 3 &&
+    evidenceQuality >= 3 &&
+    contextCount >= 2 &&
+    !hedgingSignals.evasiveVagueness;
+  const hedgingCredit = canUseHedgingAsCalibrationSupport ? Math.min(hedgeCount, 2) : 0;
+  const confidenceMismatch = absoluteCount - hedgingCredit + (evidenceSignal < 4 ? 1 : 0);
   let confidenceCalibration = 5;
   if (confidenceMismatch >= 5) confidenceCalibration = 1;
   else if (confidenceMismatch >= 3) confidenceCalibration = 2;
   else if (confidenceMismatch >= 2) confidenceCalibration = 3;
   else if (confidenceMismatch >= 1) confidenceCalibration = 4;
+
+  if (hedgingSignals.highHedgingWithWeakSpecificity && confidenceCalibration > 3) {
+    confidenceCalibration = 3;
+  }
+  if (hedgingSignals.asymmetricHedging) {
+    confidenceCalibration = Math.max(1, confidenceCalibration - 1);
+  }
+  if (hedgingSignals.evasiveVagueness && hedgeCount >= 2) {
+    confidenceCalibration = Math.max(1, confidenceCalibration - 1);
+  }
+
+  if (
+    hedgingSignals.strongAsymmetricHedging &&
+    (evidenceQuality <= 2 || sourceVisibility <= 2)
+  ) {
+    claimDiscipline = Math.max(1, claimDiscipline - 1);
+  }
 
   const uncertaintySignal = hedgeCount + limitationCount;
   let uncertaintyHandling = 1;
@@ -463,14 +574,17 @@ function computeCategoryScores(text: string): CategoryScoreMap {
   }
 
   return {
-    "Source Visibility": clampScore(sourceVisibility),
-    "Evidence Quality": clampScore(evidenceQuality),
-    "Claim Discipline": clampScore(claimDiscipline),
-    "Confidence Calibration": clampScore(confidenceCalibration),
-    "Uncertainty Handling": clampScore(uncertaintyHandling),
-    "Fact vs Interpretation": clampScore(factVsInterpretation),
-    "Context Completeness": clampScore(contextCompleteness),
-    "Verification Burden": clampScore(verificationBurden)
+    scores: {
+      "Source Visibility": clampScore(sourceVisibility),
+      "Evidence Quality": clampScore(evidenceQuality),
+      "Claim Discipline": clampScore(claimDiscipline),
+      "Confidence Calibration": clampScore(confidenceCalibration),
+      "Uncertainty Handling": clampScore(uncertaintyHandling),
+      "Fact vs Interpretation": clampScore(factVsInterpretation),
+      "Context Completeness": clampScore(contextCompleteness),
+      "Verification Burden": clampScore(verificationBurden)
+    },
+    hedgingSignals
   };
 }
 
@@ -484,7 +598,10 @@ function computeWeightedTrustScore(scores: CategoryScoreMap) {
   return Math.round(weighted);
 }
 
-function getGuardrailSignals(scores: CategoryScoreMap): GuardrailSignalSet {
+function getGuardrailSignals(
+  scores: CategoryScoreMap,
+  hedgingSignals: HedgingDistributionSignals
+): GuardrailSignalSet {
   const weakOrPoorCount = CATEGORY_ORDER.filter((category) => scores[category] <= 2).length;
   const foundationWeakCount = FOUNDATION_CATEGORIES.filter(
     (category) => scores[category] <= 2
@@ -522,6 +639,8 @@ function getGuardrailSignals(scores: CategoryScoreMap): GuardrailSignalSet {
     overextendedConclusionRisk ||
     persuasiveFramingOutrunsSupportRisk ||
     interpretationPresentedAsSettledRisk;
+  const hedgingDistributionRisk =
+    hedgingSignals.asymmetricHedging || hedgingSignals.evasiveVagueness;
   const styleConstraintBlockHighTrust =
     scores["Evidence Quality"] <= 2 || scores["Source Visibility"] <= 2;
   const capScoreAtWeak = criticalFoundationWeakCount >= 2 || foundationWeakCount >= 3;
@@ -547,7 +666,10 @@ function getGuardrailSignals(scores: CategoryScoreMap): GuardrailSignalSet {
     addSubstanceOverStyleFlag: styleOutrunsSubstance,
     addSubstanceOverStyleVerifyStep: styleOutrunsSubstance,
     addFramingRiskFlag: framingRisk,
-    addFramingRiskVerifyStep: framingRisk
+    addFramingRiskVerifyStep: framingRisk,
+    addAsymmetricHedgingFlag: hedgingSignals.asymmetricHedging,
+    addEvasiveVaguenessFlag: hedgingSignals.evasiveVagueness,
+    addHedgingVerifyStep: hedgingDistributionRisk
   };
 }
 
@@ -818,6 +940,18 @@ function buildRedFlags(scores: CategoryScoreMap, signals: GuardrailSignalSet) {
     );
   }
 
+  if (signals.addAsymmetricHedgingFlag) {
+    redFlags.push(
+      "The content uses uncertainty language unevenly, with heavier hedging around weaker or less accountable claims."
+    );
+  }
+
+  if (signals.addEvasiveVaguenessFlag) {
+    redFlags.push(
+      "The content uses indirect or heavily hedged language without clearly identifying who is making the claim or what evidence supports it."
+    );
+  }
+
   for (const category of CATEGORY_ORDER) {
     const score = scores[category];
     if (score <= 2 || (score === 3 && materiallySensitiveCategories.has(category))) {
@@ -872,6 +1006,24 @@ function buildVerifyNext(scores: CategoryScoreMap, signals: GuardrailSignalSet) 
   if (signals.addFramingRiskVerifyStep) {
     verifyNext.unshift(
       "Check for missing context or selectively presented evidence, and separate observed facts from interpretation before relying on conclusions."
+    );
+  }
+
+  if (signals.addHedgingVerifyStep) {
+    verifyNext.unshift(
+      "Clarify the specific claim being made and identify who is making it."
+    );
+  }
+
+  if (signals.addEvasiveVaguenessFlag) {
+    verifyNext.unshift(
+      "Check whether any named source, document, or evidence supports the hedged claim."
+    );
+  }
+
+  if (signals.addAsymmetricHedgingFlag) {
+    verifyNext.unshift(
+      "Compare the cautious wording against the actual level of evidence provided."
     );
   }
 
@@ -952,8 +1104,8 @@ export function analyzeTextPlaceholder(text: string): TrustCheckAnalysisResult {
     return insufficientBasisResponse(highStakesCategory);
   }
 
-  const scores = computeCategoryScores(trimmed);
-  const signals = getGuardrailSignals(scores);
+  const { scores, hedgingSignals } = computeCategoryScores(trimmed);
+  const signals = getGuardrailSignals(scores, hedgingSignals);
   const rawTrustScore = computeWeightedTrustScore(scores);
   const trustScore = applyTrustScoreGuardrails(rawTrustScore, signals);
 

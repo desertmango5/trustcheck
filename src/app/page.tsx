@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { normalizeAnalysisResult } from "@/lib/normalizeAnalysisResult";
 import { TRUSTCHECK_SAMPLE_CASES } from "@/lib/sampleCases";
 import type { TrustCheckAnalysisResult } from "@/types/trustcheck";
@@ -567,7 +566,6 @@ export default function HomePage() {
         ) : null}
 
         <footer className="page-footer-link">
-          <Link href="/how-trustcheck-works">How TrustCheck Works</Link>
           <p className="disclaimer">
             TrustCheck evaluates credibility signals. It does not guarantee
             truth or falsity.
