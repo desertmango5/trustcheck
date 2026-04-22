@@ -104,6 +104,10 @@ function renderHighStakesWarning(result: TrustCheckAnalysisResult) {
 }
 
 export default function HomePage() {
+  const [lastUsedUrlExtraction, setLastUsedUrlExtraction] = useState(false);
+  const [lastAnalyzedText, setLastAnalyzedText] = useState("");
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState("");
+  const [isExactTextModalOpen, setIsExactTextModalOpen] = useState(false);
   const [inputText, setInputText] = useState("");
   const [inputUrl, setInputUrl] = useState("");
   const [analysisResult, setAnalysisResult] =
@@ -118,14 +122,28 @@ export default function HomePage() {
     if (!isResultsOpen) return;
 
     function handleEscapeKey(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape" && !isAnalyzing) {
+      if (event.key !== "Escape") return;
+      if (isExactTextModalOpen) {
+        setIsExactTextModalOpen(false);
+        return;
+      }
+      if (!isAnalyzing) {
         setIsResultsOpen(false);
       }
     }
 
     window.addEventListener("keydown", handleEscapeKey);
     return () => window.removeEventListener("keydown", handleEscapeKey);
-  }, [isResultsOpen, isAnalyzing]);
+  }, [isResultsOpen, isAnalyzing, isExactTextModalOpen]);
+
+  useEffect(() => {
+    if (!isExactTextModalOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isExactTextModalOpen]);
 
   useEffect(() => {
     if (!isResultsOpen) {
@@ -189,6 +207,23 @@ export default function HomePage() {
       const payload = (await response.json().catch(() => null)) as
         | TrustCheckAnalysisResult
         | null;
+      const analyzedText =
+        payload && typeof payload.analysisInputText === "string"
+          ? payload.analysisInputText
+          : normalizedInput;
+      const usedUrlExtraction = payload?.usedUrlExtraction === true;
+      const analyzedAt = new Date().toISOString();
+      setLastAnalyzedText(analyzedText);
+      setLastAnalyzedAt(analyzedAt);
+      setLastUsedUrlExtraction(usedUrlExtraction);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("trustcheck:last-analyzed-text", analyzedText);
+        window.localStorage.setItem(
+          "trustcheck:last-analyzed-used-url",
+          usedUrlExtraction ? "true" : "false"
+        );
+        window.localStorage.setItem("trustcheck:last-analyzed-at", analyzedAt);
+      }
       setAnalysisResult(normalizeAnalysisResult(payload));
     } catch (error) {
       const message =
@@ -219,6 +254,10 @@ export default function HomePage() {
     setErrorMessage(null);
     setAnalysisResult(null);
     setIsResultsOpen(false);
+    setIsExactTextModalOpen(false);
+    setLastAnalyzedText("");
+    setLastAnalyzedAt("");
+    setLastUsedUrlExtraction(false);
   }
 
   function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -558,9 +597,62 @@ export default function HomePage() {
                       <h3>Content Type Guess</h3>
                       <p>{analysisResult.contentTypeGuess ?? "mixed/unclear"}</p>
                     </article>
+
+                    {lastUsedUrlExtraction && lastAnalyzedText ? (
+                      <p className="debug-link-row">
+                        <button
+                          type="button"
+                          className="debug-link-button"
+                          onClick={() => setIsExactTextModalOpen(true)}
+                        >
+                          View Exact Analyzed Text
+                        </button>
+                        <span className="debug-link-note">
+                          URL extraction was used for this analysis.
+                        </span>
+                      </p>
+                    ) : null}
                   </>
                 )}
               </section>
+            </div>
+          </div>
+        ) : null}
+
+        {isExactTextModalOpen ? (
+          <div
+            className="how-modal-overlay exact-text-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exact-analyzed-title"
+          >
+            <button
+              type="button"
+              className="how-modal-close"
+              aria-label="Close Exact Analyzed Text"
+              onClick={() => setIsExactTextModalOpen(false)}
+            >
+              X
+            </button>
+            <div className="how-modal-shell">
+              <main className="how-page how-modal-page">
+                <article className="how-card debug-analyzed-card">
+                  <h1 id="exact-analyzed-title">Exact Analyzed Text</h1>
+                  <p>
+                    This page shows the exact text payload sent into TrustCheck
+                    analysis for your most recent run.
+                  </p>
+                  <p>
+                    URL extraction used: <strong>Yes</strong>
+                  </p>
+                  {lastAnalyzedAt ? (
+                    <p>
+                      Captured at: <strong>{lastAnalyzedAt}</strong>
+                    </p>
+                  ) : null}
+                  <pre className="debug-analyzed-text">{lastAnalyzedText}</pre>
+                </article>
+              </main>
             </div>
           </div>
         ) : null}

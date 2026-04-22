@@ -58,6 +58,8 @@ export interface TrustCheckAnalysisResult {
   message?: string;
   possibleReasons?: string[];
   nextStep?: string;
+  analysisInputText?: string;
+  usedUrlExtraction?: boolean;
 }
 
 export interface AnalyzeTrustRequestBody {

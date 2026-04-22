@@ -80,7 +80,14 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(
+      {
+        ...result,
+        analysisInputText,
+        usedUrlExtraction
+      },
+      { status: 200 }
+    );
   } catch {
     return NextResponse.json(
       { error: "Unable to process analysis request." },

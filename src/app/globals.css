@@ -426,6 +426,7 @@ body {
 
 .results-modal .results {
   border-top: 0;
+  border-left: 0;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
@@ -900,6 +901,49 @@ body {
   text-decoration: underline;
 }
 
+.debug-link-row {
+  margin: 0.45rem 0 0.1rem;
+  font-size: 0.97rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.debug-link-button {
+  border: 0;
+  background: transparent;
+  justify-self: start;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.debug-link-button:hover {
+  color: var(--accent-hover);
+}
+
+.debug-link-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.exact-text-modal-overlay {
+  z-index: 120;
+}
+
+.exact-text-modal-overlay .how-modal-shell {
+  transform: scale(1);
+  opacity: 1;
+  border-radius: 0;
+}
+
+.exact-text-modal-overlay .how-modal-close {
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 0ms;
+}
+
 .how-page {
   min-height: 100dvh;
   background: var(--bg);
@@ -1140,6 +1184,24 @@ body {
   background: #111922;
   border-color: #2e4563;
   box-shadow: 0 18px 45px rgba(5, 10, 18, 0.45);
+}
+
+.debug-analyzed-card {
+  gap: 0.8rem;
+}
+
+.debug-analyzed-text {
+  margin: 0.25rem 0 0;
+  padding: 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--section-border);
+  background: var(--section-bg-soft);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 65dvh;
+  overflow: auto;
+  font: 0.86rem/1.42 Consolas, Monaco, "Courier New", monospace;
 }
 
 :root[data-theme="dark"] .how-floating-button,
