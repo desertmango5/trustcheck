@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import ThemeToggle from "@/components/ThemeToggle";
 import HowTrustCheckModal from "@/components/HowTrustCheckModal";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: "TrustCheck",
@@ -32,6 +33,7 @@ export default function RootLayout({
         <ThemeToggle />
         <HowTrustCheckModal />
         {children}
+        <Analytics />
       </body>
     </html>
   );
